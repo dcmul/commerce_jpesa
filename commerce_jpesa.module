@@ -1,0 +1,379 @@
+<?php
+
+/**
+ * @file
+ * Provides a payment method for Drupal Commerce for testing and
+ *   development.
+ */
+
+
+/**
+ * Implements hook_commerce_payment_method_info().
+ */
+function commerce_jpesa_commerce_payment_method_info() {
+  $payment_methods = array();
+
+  $payment_methods['commerce_jpesa'] = array(
+    'title' => t('JPesa payment'),
+    'description' => t('Implements JPesa payment method.'),
+    'active' => TRUE,
+  );
+
+  return $payment_methods;
+}
+
+/**
+ * Payment method callback: submit form.
+ */
+function commerce_jpesa_submit_form($payment_method, $pane_values, $checkout_pane, $order) {
+    
+  //dd($payment_method);  
+  $providers = array (
+    '1' => 'MTN Mobile Money',
+    '2' => 'M-Sente',
+    '3' => 'Airtel Money - Uganda',
+    '4' => 'M-Pesa',
+    '7' => 'Warid Pesa',
+  );  
+  $providers_numbers = array (
+    '1' => '(256) 776-567-374',
+    '2' => '(256) 711-567-374',
+    '3' => '(256) 750-567-374',
+    '4' => '(254) 712-830-482',
+    '7' => '(256) 703-567-374',
+  );    
+  $transaction_ids = array (
+    '2' => 'Mobile Money Transaction ID',
+    '1' => 'JPesa Key',
+  );    
+
+  $form['jpesa'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Initial Info'),
+  );
+  
+  $form['jpesa']['mobile_provider'] = array(
+    '#type' => 'select',
+    '#options' => array('---Select--') + $providers,
+    '#title' => t('Mobile Provider'),
+    '#ajax' => array(
+      'callback' => 'commerce_jpesa_show_hint_callback',
+      'wrapper' => 'hint_textfield_div',
+    ),      
+    '#description' => t('Select mobile provider. And follow the instructions that follow.'),
+  );
+  
+  // This entire form element will be replaced whenever 'changethis' is updated.
+  $form['jpesa']['hint_textfield'] = array(
+    //'#type' => 'textfield',
+    //'#markup' => t("Why"),
+    
+    // The prefix/suffix provide the div that we're replacing, named by
+    // #ajax['wrapper'] above.
+    '#prefix' => '<div id="hint_textfield_div">',
+    '#suffix' => '</div>',
+  );
+  
+  $form['jpesa']['key_type'] = array(
+    '#type' => 'radios',
+    '#options' => $transaction_ids,
+    '#default_value' => '2',      
+    '#title' => t('Key Type'),
+    '#description' => t('Select the type of key you will enter in the field below '),
+  );  
+  
+  $form['jpesa']['key'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Key (JPesa/Mobile TransationID)'),
+
+    '#description' => t('Enter a JPesa Key or Mobile Provider Transaction ID .'),  
+      
+  );
+  
+  
+  if (!empty($pane_values['payment_details']['jpesa']['mobile_provider'])) {
+    $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
+    $total_order = $order_wrapper->commerce_order_total->value();  
+    $exchange_rate = null;
+    
+    $sub_total = commerce_currency_format($total_order['amount'], $total_order['currency_code']);
+    
+    $settings = $payment_method['settings'];
+    $provider_id = $pane_values['payment_details']['jpesa']['mobile_provider'];
+    $component_titles = commerce_price_component_titles();
+    //dd(commerce_price_component_titles() );
+    
+    $site_currency_code = $provider_id != 4 ? 'UGX' : 'KES';
+    
+    $exchange_rate = _commerce_jpesa_exchange_rate($settings, $provider_id, $total_order['currency_code']);
+    $sub_total_decimal = commerce_currency_amount_to_decimal($total_order['amount'],$total_order['currency_code']);
+    $sub_total_decimal = _commerce_jpesa_adjust_price($sub_total_decimal, $exchange_rate);
+    $rows = array();
+    foreach($total_order['data']['components'] as $component) {
+      $row_amount = commerce_currency_amount_to_decimal($component['price']['amount'], $component['price']['currency_code']);
+      $row_amount = _commerce_jpesa_adjust_price($row_amount, $exchange_rate);
+      $rows[] = array(
+          $component_titles[$component['name']],
+          number_format($row_amount, 2) . ' ' . $site_currency_code ,
+      );
+    }  
+    
+    $charges = _commerce_jpesa_get_mm_charges($settings, $provider_id, $sub_total_decimal, $total_order['currency_code']);
+    $rows[] = array( 
+      'Mobile Provider Charges on ' . number_format($sub_total_decimal, 2) . ' ' . $site_currency_code , 
+      number_format($charges, 2) . ' ' . $site_currency_code,
+    );
+    
+    $final_total = $charges + $sub_total_decimal;
+    $rows[] = array( 
+      'Total Amount due' , 
+      number_format($final_total, 2) . ' ' . $site_currency_code,
+    );
+        
+      
+    $hints = array (
+      '#theme' => 'commerce_jpesa_hints',
+      '#order_no' => "0",
+      '#base_price' => "0",
+      '#order_phone_no' => $providers_numbers[$provider_id],
+      '#order_currency' => $site_currency_code,
+      '#order_total' => number_format($final_total,2) , 
+      '#order_provider' => $providers[$provider_id],
+      '#order_exrate' => number_format($exchange_rate,2),
+      '#order_old_currency' => $total_order['currency_code'],          
+      '#table_rows' => $rows,
+
+    );  
+    //dd($total_order);
+    //_commerce_jpesa_get_mm_charges($settings, $provider_id, $sub_total);
+  
+
+      // watchdog("kick#########",'in the functuio');
+    $form['jpesa']['hint_textfield']['#markup'] = drupal_render($hints);
+  } 
+
+  return $form;
+
+  // Default to a known test credit card number. For valid numbers of other card
+  // types see: http://www.rimmkaufman.com/blog/credit-card-test-numbers/09112007/
+ // return commerce_payment_credit_card_form(array(), array('number' => '4111111111111111'));
+}
+
+/**
+ * Payment method callback: submit form validation.
+ */
+function commerce_jpesa_submit_form_validate($payment_method, $pane_form, $pane_values, $order, $form_parents = array()) {
+  // Validate the credit card fields.
+//  module_load_include('inc', 'commerce_payment', 'includes/commerce_payment.credit_card');
+//
+//  $settings = array(
+//    'form_parents' => array_merge($form_parents, array('credit_card')),
+//  );
+
+  // Even though a form error triggered by the validate handler would be enough
+  // to stop the submission of the form, it's not enough to stop it from a
+  // Commerce standpoint because of the combined validation / submission going
+  // on per-pane in the checkout form. Thus even with a call to form_set_error()
+  // this validate handler must still return FALSE.
+//  if (!commerce_payment_credit_card_validate($pane_values['credit_card'], $settings)) {
+//    return FALSE;
+//  }
+}
+
+/**
+ * Payment method callback: submit form submission.
+ */
+function commerce_jpesa_submit_form_submit($payment_method, $pane_form, $pane_values, $order, $charge) {
+  // Just as an example, we might store information in the order object from the
+  // payment parameters, though we would never save a full credit card number,
+  // even in examples!
+  $number = $pane_values['credit_card']['number'];
+  $pane_values['credit_card']['number'] = substr($number, 0, 4) . str_repeat('-', strlen($number) - 8) . substr($number, -4);
+
+  $order->data['commerce_jpesa'] = $pane_values;
+
+  // Every attempted transaction should result in a new transaction entity being
+  // created for the order to log either the success or the failure.
+  commerce_jpesa_transaction($payment_method, $order, $charge);
+}
+
+/**
+ * Creates a payment transaction for the specified charge amount.
+ *
+ * @param $payment_method
+ *   The payment method instance object used to charge this payment.
+ * @param $order
+ *   The order object the payment applies to.
+ * @param $charge
+ *   An array indicating the amount and currency code to charge.
+ */
+function commerce_jpesa_transaction($payment_method, $order, $charge) {
+  $card_details = $order->data['commerce_jpesa']['credit_card'];
+
+  $transaction = commerce_payment_transaction_new('commerce_jpesa', $order->order_id);
+  $transaction->instance_id = $payment_method['instance_id'];
+  $transaction->amount = $charge['amount'];
+  $transaction->currency_code = $charge['currency_code'];
+  $transaction->status = COMMERCE_PAYMENT_STATUS_SUCCESS;
+
+  $transaction->message = 'Number: @number<br/>Expiration: @month/@year';
+  $transaction->message_variables = array(
+    '@number' => $card_details['number'],
+    '@month' => $card_details['exp_month'],
+    '@year' => $card_details['exp_year'],
+  );
+
+  commerce_payment_transaction_save($transaction);
+  return $transaction;
+}
+
+function commerce_jpesa_show_hint_callback($form, $form_state) {
+  // The form has already been submitted and updated. We can return the replaced
+  // item as it is.
+  //watchdog("kick", print_r(array_keys($form['commerce_payment']['payment_details']['jpesa']), TRUE))  ;
+  return $form['commerce_payment']['payment_details']['jpesa']['hint_textfield'];
+  
+  //return "silly";
+}
+
+function commerce_jpesa_theme() {
+  //watchdog("kick", 'did we reach here')  ;
+  return array(
+    'commerce_jpesa_hints' => array(
+      'variables' => array(
+        'order_no' => "0",
+        'order_total' => "0",
+        'order_currency' => '', 
+        'order_phone_no' => "0",
+        'amount' => "0",
+        'order_provider'=> '',
+        'order_exrate'=> '',
+        'order_old_currency'=> '',  
+        'table_rows' => "0",          
+      ),
+      'template' => 'commerce-jpesa-hints',
+      'path' => drupal_get_path('module', 'commerce_jpesa') . '/theme',
+    ),
+  );
+}
+
+
+
+function commerce_jpesa_settings_form($settings = NULL) {
+  $form = array();
+  $settings = (array) $settings + array(
+    'username' => '',
+    'password' => '',
+    'api_access_key' => '',
+  );
+  $form['contact_us'] = array(
+    '#type' => 'markup',
+    '#markup' => t('JPesa Account Settings' ),
+  );
+  $form['username'] = array(
+    '#type' => 'textfield',
+    '#title' => t('JPesa Username'),
+    '#description' => t('The username to the JPesa account.'),
+    '#default_value' => $settings['username'],
+    '#required' => TRUE,
+  );
+  $form['password'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Password'),
+    '#default_value' => $settings['password'],
+    '#required' => TRUE,
+  );
+  $form['api_access_key'] = array(
+    '#type' => 'textfield',
+    '#title' => t('API Access Key'),
+    '#default_value' => $settings['api_access_key'],
+    '#required' => TRUE,
+  );
+
+  return $form;
+}
+
+function _commerce_jpesa_get_mm_charges($settings, $provider_id, $amount, $currency_code) {
+
+    
+    
+    $data = array(
+      'amount' => $amount,
+      'pid' => $provider_id,  
+      'command' => 'mm_provider_charges',  
+    );
+    $charges = _commerce_jpesa_call_api($settings, $data);
+    
+    return $charges;
+}
+
+function _commerce_jpesa_exchange_rate($settings, $provider_id, $currency_code) {
+
+    $data = array();
+    
+    
+    if($currency_code == 'KES') {
+      $currency_code = 'KSH';    
+    }
+    
+    if($provider_id==4 && $currency_code!='KES') {
+      $data = array(
+        'to' => $currency_code,
+        'from' => 'KSH',  
+        'command' => 'exrate',  
+      );
+      //dd($data);
+      $exchange_rate = _commerce_jpesa_call_api($settings, $data);
+    }
+    elseif($provider_id!=4 && $currency_code!='UGX') {
+      $data = array(
+        'to' => $currency_code,
+        'from' => 'UGX', 
+        'command' => 'exrate',   
+      );
+      //dd($data);
+      $exchange_rate = _commerce_jpesa_call_api($settings, $data);
+    }  
+    
+    if(!empty($exchange_rate)) {
+        //dd($exchange_rate);
+        return $exchange_rate;
+    }
+    
+    return FALSE;
+    //if(!empty($d))
+}
+
+
+function _commerce_jpesa_adjust_price($oldvalue , $exchange_rate ) {
+   if(empty($exchange_rate)) {
+       
+     return $oldvalue ; 
+   }
+   else {
+     return ($oldvalue * $exchange_rate) ;   
+   }
+}
+
+function _commerce_jpesa_call_api($settings, $data = NULL) {
+  
+  $url = 'https://www.jpesa.com/cp/api/interface.php';
+  $data = (array) $data + array(
+    'username' => $settings['username'],
+    'password' => $settings['password'],
+    'mapi_access_key' => $settings['api_access_key'],    
+  );
+  //dd($data);
+  $full_url = url($url, array('query' => $data));
+  
+  
+  $response = drupal_http_request($full_url);
+  dd($response);
+  if(!empty($response->data)) {
+    return $response->data;    
+  }
+
+  return FALSE;
+     
+}
+

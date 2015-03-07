@@ -1,0 +1,7 @@
+name = Jpesa Payment 
+description = Implements a Jpesa method for drupal commerce.
+package = Commerce
+dependencies[] = commerce
+dependencies[] = commerce_payment
+core = 7.x
+
