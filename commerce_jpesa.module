@@ -144,7 +144,7 @@ function commerce_jpesa_submit_form($payment_method, $pane_values, $checkout_pan
       '#order_currency' => $site_currency_code,
       '#order_total' => number_format($final_total,2) , 
       '#order_provider' => $providers[$provider_id],
-      '#order_exrate' => number_format($exchange_rate,2),
+      '#order_exrate' => (empty($exchange_rate) ? 0 : number_format($exchange_rate,2)),
       '#order_old_currency' => $total_order['currency_code'],          
       '#table_rows' => $rows,
 
