@@ -438,7 +438,7 @@ function _commerce_jpesa_call_api($settings, $data = NULL) {
     'password' => $settings['password'],
     'mapi_access_key' => $settings['api_access_key'],    
   );
-  dd($data);
+  //dd($data);
   $full_url = url($url, array('query' => $data));
   
   
