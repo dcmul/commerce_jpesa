@@ -179,7 +179,7 @@ function commerce_jpesa_submit_form_validate($payment_method, $pane_form, $pane_
     $provider_id = $pane_values['jpesa']['mobile_provider'];
     $settings = $payment_method['settings'];
     
-    if(!_commerce_jpesa_validate_transaction_id($settings, $key_type, $key)) {
+    if(!_commerce_jpesa_validate_transaction_id($settings, $key_type, $key, $provider_id)) {
         
       drupal_set_message(t('Invalid JPesa key/Transaction ID'),'error');  
   
@@ -198,7 +198,7 @@ function commerce_jpesa_submit_form_validate($payment_method, $pane_form, $pane_
     
  
   $charges = _commerce_jpesa_get_mm_charges($settings, $provider_id, $sub_total_decimal, $total_order['currency_code']);
-  $final_total = $charges + $sub_total_decimal;
+  $final_total = $sub_total_decimal;
   
    watchdog("jpesa", $final_total );
   $redeem_result = _commerce_jpesa_redeem_key($settings, $key_type, $key, $provider_id, $final_total);
@@ -346,11 +346,12 @@ function _commerce_jpesa_get_mm_charges($settings, $provider_id, $amount, $curre
     return $charges;
 }
 
-function _commerce_jpesa_validate_transaction_id($settings, $key_type, $key) {
+function _commerce_jpesa_validate_transaction_id($settings, $key_type, $key, $provider_id) {
     
     $data = array(
       'epay_key' => $key,
       'key_type' => $key_type,  
+      'pid' => $provider_id,     
       'command' => 'validate',  
     );
     $key_state = _commerce_jpesa_call_api($settings, $data);
@@ -437,7 +438,7 @@ function _commerce_jpesa_call_api($settings, $data = NULL) {
     'password' => $settings['password'],
     'mapi_access_key' => $settings['api_access_key'],    
   );
-  //dd($data);
+  dd($data);
   $full_url = url($url, array('query' => $data));
   
   
