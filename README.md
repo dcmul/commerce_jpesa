@@ -9,5 +9,6 @@ Installation.
 
 
 Module will handle only 3 currencies, UGX Uganda Shillings, KES Kenya Shillings, USD US Dollars.
-So the products have to be in one of the currencoes above.
+So the products have to be in one of the currencies above.
+
 
